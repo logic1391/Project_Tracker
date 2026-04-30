@@ -47,9 +47,3 @@ npm run dev
 
 The frontend will be available at `http://localhost:5173` and the backend will run on `http://localhost:5001`.
 
-## Deployment
-
-The project is structured as a monolith for easy deployment to platforms like **Railway** or **Render**. 
-- In production, the Express backend serves the statically built React frontend from the `client/dist` folder.
-- Ensure you set `NODE_ENV=production` and map your environment variables accordingly. 
-- *Note*: For production environments, it is highly recommended to swap SQLite for a persistent database like PostgreSQL.
