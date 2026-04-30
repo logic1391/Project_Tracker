@@ -75,6 +75,16 @@ const Tasks = () => {
     }
   };
 
+  const handleDeleteTask = async (taskId) => {
+    if (!window.confirm('Are you sure you want to delete this task?')) return;
+    try {
+      await api.delete(`/tasks/${taskId}`);
+      setTasks(tasks.filter(t => t.id !== taskId));
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to delete task');
+    }
+  };
+
   const getStatusBadgeClass = (status) => {
     switch(status) {
       case 'To Do': return 'badge-pending';
