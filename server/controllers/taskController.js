@@ -74,4 +74,25 @@ const deleteTask = async (req, res) => {
   }
 };
 
-module.exports = { getTasks, createTask, updateTaskStatus, deleteTask };
+const updateTask = async (req, res) => {
+  try {
+    const { title, description, due_date, assigned_to, priority, status } = req.body;
+    const task = await Task.findByPk(req.params.id);
+    
+    if (!task) return res.status(404).json({ message: 'Task not found' });
+
+    task.title = title !== undefined ? title : task.title;
+    task.description = description !== undefined ? description : task.description;
+    task.due_date = due_date !== undefined ? due_date : task.due_date;
+    task.assigned_to = assigned_to !== undefined ? (assigned_to || null) : task.assigned_to;
+    task.priority = priority !== undefined ? priority : task.priority;
+    task.status = status !== undefined ? status : task.status;
+    
+    await task.save();
+    res.json(task);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+module.exports = { getTasks, createTask, updateTaskStatus, deleteTask, updateTask };

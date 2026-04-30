@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { AuthContext } from '../../context/AuthContext';
 import api from '../../services/api';
-import { CheckSquare, Plus, Clock, Calendar, CheckCircle, Activity, User, AlertCircle, Trash2 } from 'lucide-react';
+import { CheckSquare, Plus, Clock, Calendar, CheckCircle, Activity, User, AlertCircle, Trash2, Edit2 } from 'lucide-react';
 
 const Tasks = () => {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
   const { user } = useContext(AuthContext);
 
   // New Task Form State
@@ -82,6 +84,42 @@ const Tasks = () => {
       setTasks(tasks.filter(t => t.id !== taskId));
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to delete task');
+    }
+  };
+
+  const openEditModal = (task) => {
+    setSelectedTaskId(task.id);
+    setTitle(task.title);
+    setDescription(task.description || '');
+    setDueDate(task.due_date || '');
+    setProjectId(task.project_id || (projects.length > 0 ? projects[0].id : ''));
+    setAssignedTo(task.assigned_to || '');
+    setPriority(task.priority || 'Medium');
+    setError('');
+    setIsEditModalOpen(true);
+  };
+
+  const handleEditTask = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      await api.put(`/tasks/${selectedTaskId}`, {
+        title,
+        description,
+        due_date: dueDate,
+        project_id: projectId,
+        assigned_to: assignedTo || null,
+        priority
+      });
+      setIsEditModalOpen(false);
+      setTitle('');
+      setDescription('');
+      setDueDate('');
+      setAssignedTo('');
+      setPriority('Medium');
+      fetchData();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update task');
     }
   };
 
@@ -180,9 +218,14 @@ const Tasks = () => {
                   <option value="Done">Done</option>
                 </select>
                 {user?.role === 'Admin' && (
-                  <button onClick={() => handleDeleteTask(task.id)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer' }}>
-                    <Trash2 size={18} />
-                  </button>
+                  <>
+                    <button onClick={() => openEditModal(task)} style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer' }}>
+                      <Edit2 size={18} />
+                    </button>
+                    <button onClick={() => handleDeleteTask(task.id)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer' }}>
+                      <Trash2 size={18} />
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -287,6 +330,100 @@ const Tasks = () => {
               {projects.length === 0 && (
                 <p style={{ color: 'var(--danger-color)', fontSize: '0.8rem', marginTop: '0.5rem' }}>You need to create a project first before creating tasks.</p>
               )}
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Task Modal */}
+      {isEditModalOpen && user?.role === 'Admin' && (
+        <div className="modal-overlay" onClick={() => setIsEditModalOpen(false)}>
+          <div className="glass modal-content" style={{ padding: '2rem' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Edit2 size={24} color="var(--primary-color)" /> Edit Task
+            </h2>
+            {error && <div style={{ color: 'var(--danger-color)', marginBottom: '1rem' }}>{error}</div>}
+            <form onSubmit={handleEditTask}>
+              <div className="form-group">
+                <label className="form-label">Task Title</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  required 
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea 
+                  className="form-control" 
+                  rows="3"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                ></textarea>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Due Date</label>
+                  <input 
+                    type="date" 
+                    className="form-control" 
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Project</label>
+                  <select 
+                    className="form-control"
+                    value={projectId}
+                    onChange={(e) => setProjectId(e.target.value)}
+                    required
+                  >
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>{p.title}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Priority</label>
+                  <select 
+                    className="form-control"
+                    value={priority}
+                    onChange={(e) => setPriority(e.target.value)}
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Assign To</label>
+                  <select 
+                    className="form-control"
+                    value={assignedTo}
+                    onChange={(e) => setAssignedTo(e.target.value)}
+                  >
+                    <option value="">-- Unassigned --</option>
+                    {selectedProjectObj?.members?.map(m => (
+                      <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
+                <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary">
+                  Save Changes
+                </button>
+              </div>
             </form>
           </div>
         </div>
