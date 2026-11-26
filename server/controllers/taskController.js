@@ -1,5 +1,8 @@
 const { Task, Project, User, ProjectMember } = require('../models');
 const { TASK_STATUSES, TASK_PRIORITIES, isProjectMember, isValidDate } = require('../utils/validation');
+const { canManageProject } = require('../utils/permissions');
+
+const FORBIDDEN_TASK = { message: 'Access forbidden: requires Admin role on this project' };
 
 // Validates the editable task fields shared by create and update.
 // Returns an error message, or null when everything is valid.
@@ -61,6 +64,7 @@ const createTask = async (req, res) => {
     if (!project_id) return res.status(400).json({ message: 'Project is required' });
     const project = await Project.findByPk(project_id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
+    if (!(await canManageProject(req.user, project.id))) return res.status(403).json(FORBIDDEN_TASK);
 
     if (assigned_to && !(await isProjectMember(assigned_to, project.id))) {
       return res.status(400).json({ message: 'Assignee must be a member of the project' });
@@ -91,8 +95,8 @@ const updateTaskStatus = async (req, res) => {
 
     if (!task) return res.status(404).json({ message: 'Task not found' });
 
-    // Restrict update to Assigned Member or Admin
-    if (req.user.role !== 'Admin' && task.assigned_to !== req.user.id) {
+    // Assignees, global Admins and project Admins may change the status
+    if (task.assigned_to !== req.user.id && !(await canManageProject(req.user, task.project_id))) {
       return res.status(403).json({ message: 'You are not assigned to this task' });
     }
 
@@ -109,6 +113,7 @@ const deleteTask = async (req, res) => {
   try {
     const task = await Task.findByPk(req.params.id);
     if (!task) return res.status(404).json({ message: 'Task not found' });
+    if (!(await canManageProject(req.user, task.project_id))) return res.status(403).json(FORBIDDEN_TASK);
 
     await task.destroy();
     res.json({ message: 'Task deleted successfully' });
@@ -123,6 +128,7 @@ const updateTask = async (req, res) => {
     const task = await Task.findByPk(req.params.id);
 
     if (!task) return res.status(404).json({ message: 'Task not found' });
+    if (!(await canManageProject(req.user, task.project_id))) return res.status(403).json(FORBIDDEN_TASK);
 
     const validationError = validateTaskFields({ title, due_date, priority, status }, { requireTitle: false });
     if (validationError) return res.status(400).json({ message: validationError });
@@ -132,6 +138,8 @@ const updateTask = async (req, res) => {
     if (project_id !== undefined && project_id !== null && project_id !== '' && parseInt(project_id, 10) !== task.project_id) {
       const project = await Project.findByPk(project_id);
       if (!project) return res.status(404).json({ message: 'Project not found' });
+      // Moving a task requires Admin rights on the destination project too
+      if (!(await canManageProject(req.user, project.id))) return res.status(403).json(FORBIDDEN_TASK);
       targetProjectId = project.id;
     }
 

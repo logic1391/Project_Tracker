@@ -4,6 +4,7 @@ const PROJECT_STATUSES = ['Draft', 'Active', 'Completed'];
 const TASK_STATUSES = ['To Do', 'In Progress', 'Done'];
 const TASK_PRIORITIES = ['Low', 'Medium', 'High'];
 const MEMBER_ROLES = ['Admin', 'Member'];
+const USER_ROLES = ['Admin', 'Member'];
 
 // Returns true when the given user belongs to the given project
 const isProjectMember = async (userId, projectId) => {
@@ -27,6 +28,7 @@ module.exports = {
   TASK_STATUSES,
   TASK_PRIORITIES,
   MEMBER_ROLES,
+  USER_ROLES,
   isProjectMember,
   isValidDate,
   today

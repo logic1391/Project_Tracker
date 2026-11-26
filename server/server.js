@@ -15,10 +15,21 @@ app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/projects', require('./routes/projectRoutes'));
 app.use('/api/tasks', require('./routes/taskRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
+app.use('/api/users', require('./routes/userRoutes'));
 
 // Unknown API routes return JSON instead of falling through to the SPA
 app.use('/api', (req, res) => {
   res.status(404).json({ message: 'API route not found' });
+});
+
+// Malformed JSON bodies and other unhandled errors return JSON, never an HTML stack trace
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ message: 'Request body must be valid JSON' });
+  }
+  console.error(err);
+  res.status(err.status || 500).json({ message: 'Internal server error' });
 });
 
 // Serve frontend in production
