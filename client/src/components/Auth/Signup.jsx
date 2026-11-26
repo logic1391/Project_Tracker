@@ -2,12 +2,12 @@ import { useState, useContext } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { AuthContext } from '../../context/auth-context';
 import { UserPlus } from 'lucide-react';
+import { Alert } from '../ui/States';
 
 const Signup = () => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [role, setRole] = useState('Member');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { register } = useContext(AuthContext);
@@ -18,88 +18,84 @@ const Signup = () => {
     setError('');
     setIsLoading(true);
 
-    const result = await register(name, email, password, role);
+    const result = await register(name, email, password);
+    setIsLoading(false);
     if (result.success) {
-      navigate('/login'); // Redirect to login after successful signup
+      const notice = result.user?.role === 'Admin'
+        ? 'Account created. As the first user you are the workspace Admin. Sign in to get started.'
+        : 'Account created. Sign in to continue.';
+      navigate('/login', { state: { notice, email } });
     } else {
       setError(result.message);
     }
-    setIsLoading(false);
   };
 
   return (
-    <div className="auth-container">
+    <main className="auth-container">
       <div className="glass auth-card">
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--primary-color)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', marginBottom: '1rem' }}>
-            <UserPlus size={24} />
-          </div>
-          <h2 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Create Account</h2>
-          <p style={{ color: 'var(--text-muted)' }}>Join Project Tracker today</p>
+        <div className="auth-head">
+          <div className="auth-icon" aria-hidden="true"><UserPlus size={24} /></div>
+          <h1 className="auth-title">Create account</h1>
+          <p className="muted">Join Project Tracker today</p>
         </div>
 
-        {error && (
-          <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--danger-color)', color: '#fca5a5', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-            {error}
-          </div>
-        )}
+        {error && <Alert type="error">{error}</Alert>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Full Name</label>
-            <input 
-              type="text" 
-              className="form-control" 
-              placeholder="John Doe"
+            <label className="form-label" htmlFor="signup-name">Full name</label>
+            <input
+              id="signup-name"
+              type="text"
+              className="form-control"
+              placeholder="Jane Doe"
+              autoComplete="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Email Address</label>
-            <input 
-              type="email" 
-              className="form-control" 
+            <label className="form-label" htmlFor="signup-email">Email address</label>
+            <input
+              id="signup-email"
+              type="email"
+              className="form-control"
               placeholder="you@example.com"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Password</label>
-            <input 
-              type="password" 
-              className="form-control" 
-              placeholder="••••••••"
+            <label className="form-label" htmlFor="signup-password">Password</label>
+            <input
+              id="signup-password"
+              type="password"
+              className="form-control"
+              autoComplete="new-password"
+              aria-describedby="signup-password-hint"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
             />
+            <p id="signup-password-hint" className="form-hint">At least 6 characters.</p>
           </div>
-          <div className="form-group">
-            <label className="form-label">Role</label>
-            <select 
-              className="form-control"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-            >
-              <option value="Member">Member</option>
-              <option value="Admin">Admin</option>
-            </select>
-          </div>
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoading}>
-            {isLoading ? 'Creating Account...' : 'Sign Up'}
+          <p className="form-hint" style={{ marginBottom: '1.25rem' }}>
+            New accounts join as Members. An Admin can give you more access from the Team page.
+          </p>
+          <button type="submit" className="btn btn-primary btn-block" disabled={isLoading}>
+            {isLoading ? 'Creating account…' : 'Create account'}
           </button>
         </form>
 
-        <p style={{ textAlign: 'center', marginTop: '2rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-          Already have an account? <Link to="/login" style={{ color: 'var(--primary-color)', textDecoration: 'none' }}>Sign in</Link>
+        <p className="auth-foot">
+          Already have an account? <Link to="/login">Sign in</Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 };
 

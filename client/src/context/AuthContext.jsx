@@ -17,6 +17,21 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(readStoredUser);
   const loading = false;
 
+  // Re-read the current user so role changes made by an Admin take effect
+  // without signing out and in again. A 401 is handled by the interceptor.
+  useEffect(() => {
+    if (!localStorage.getItem('token')) return;
+    let ignore = false;
+    api.get('/auth/me')
+      .then(({ data }) => {
+        if (ignore || !data?.user) return;
+        localStorage.setItem('user', JSON.stringify(data.user));
+        setUser(prev => (prev && prev.role === data.user.role && prev.name === data.user.name ? prev : data.user));
+      })
+      .catch(() => {});
+    return () => { ignore = true; };
+  }, []);
+
   // Log out automatically when the API reports an expired/invalid token
   useEffect(() => {
     const handleExpired = () => setUser(null);
@@ -36,19 +51,19 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       return { 
         success: false, 
-        message: error.response?.data?.message || 'Login failed' 
+        message: error.response?.data?.message || (error.response ? 'Login failed' : 'Cannot reach the server. Check your connection and try again.')
       };
     }
   };
 
-  const register = async (name, email, password, role) => {
+  const register = async (name, email, password) => {
     try {
-      await api.post('/auth/register', { name, email, password, role });
-      return { success: true };
+      const response = await api.post('/auth/register', { name, email, password });
+      return { success: true, user: response.data.user };
     } catch (error) {
       return { 
         success: false, 
-        message: error.response?.data?.message || 'Registration failed' 
+        message: error.response?.data?.message || (error.response ? 'Registration failed' : 'Cannot reach the server. Check your connection and try again.')
       };
     }
   };

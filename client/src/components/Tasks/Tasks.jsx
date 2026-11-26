@@ -1,27 +1,127 @@
 import { useState, useEffect, useContext } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AuthContext } from '../../context/auth-context';
 import api from '../../services/api';
-import { CheckSquare, Plus, Clock, Calendar, CheckCircle, Activity, User, AlertCircle, Trash2, Edit2 } from 'lucide-react';
+import { CheckSquare, Plus, Clock, Calendar, CheckCircle, Activity, User, AlertCircle, Trash2, Edit2, FolderKanban, Flag } from 'lucide-react';
+import Modal from '../ui/Modal';
+import { LoadingState, ErrorState, EmptyState, Alert } from '../ui/States';
+import { apiError, canManageProject, formatDate, todayISO } from '../../utils/format';
+
+const STATUS_META = {
+  'To Do': { badge: 'badge-pending', icon: Clock },
+  'In Progress': { badge: 'badge-progress', icon: Activity },
+  'Done': { badge: 'badge-completed', icon: CheckCircle },
+};
+const PRIORITY_BADGE = { High: 'badge-high', Medium: 'badge-medium', Low: 'badge-low' };
+const FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'open', label: 'Open' },
+  { id: 'mine', label: 'Assigned to me' },
+  { id: 'overdue', label: 'Overdue' },
+];
+
+const TaskForm = ({ initial, projects, submitLabel, onSubmit, onCancel }) => {
+  const [title, setTitle] = useState(initial.title || '');
+  const [description, setDescription] = useState(initial.description || '');
+  const [dueDate, setDueDate] = useState(initial.due_date || '');
+  const [projectId, setProjectId] = useState(String(initial.project_id || projects[0]?.id || ''));
+  const [assignedTo, setAssignedTo] = useState(initial.assigned_to ? String(initial.assigned_to) : '');
+  const [priority, setPriority] = useState(initial.priority || 'Medium');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const selectedProject = projects.find(p => String(p.id) === projectId);
+
+  const handleProjectChange = (value) => {
+    setProjectId(value);
+    // The assignee must belong to the selected project
+    const project = projects.find(p => String(p.id) === value);
+    if (!project?.members?.some(m => String(m.id) === assignedTo)) setAssignedTo('');
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSaving(true);
+    const message = await onSubmit({
+      title,
+      description,
+      due_date: dueDate || null,
+      project_id: projectId,
+      assigned_to: assignedTo || null,
+      priority
+    });
+    setSaving(false);
+    if (message) setError(message);
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      {error && <Alert type="error">{error}</Alert>}
+      <div className="form-group">
+        <label className="form-label" htmlFor="task-title">Title</label>
+        <input id="task-title" type="text" className="form-control" value={title} onChange={(e) => setTitle(e.target.value)} required maxLength={200} />
+      </div>
+      <div className="form-group">
+        <label className="form-label" htmlFor="task-description">Description <span className="optional">(optional)</span></label>
+        <textarea id="task-description" className="form-control" rows="3" value={description} onChange={(e) => setDescription(e.target.value)} />
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label" htmlFor="task-project">Project</label>
+          <select id="task-project" className="form-control" value={projectId} onChange={(e) => handleProjectChange(e.target.value)} required>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label" htmlFor="task-assignee">Assignee</label>
+          <select id="task-assignee" className="form-control" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+            <option value="">Unassigned</option>
+            {selectedProject?.members?.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label" htmlFor="task-priority">Priority</label>
+          <select id="task-priority" className="form-control" value={priority} onChange={(e) => setPriority(e.target.value)}>
+            <option value="Low">Low</option>
+            <option value="Medium">Medium</option>
+            <option value="High">High</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label className="form-label" htmlFor="task-due">Due date <span className="optional">(optional)</span></label>
+          <input id="task-due" type="date" className="form-control" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+        </div>
+      </div>
+      <p className="form-hint">Only members of the selected project can be assigned.</p>
+      <div className="form-actions">
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancel</button>
+        <button type="submit" className="btn btn-primary" disabled={saving || projects.length === 0}>{saving ? 'Saving…' : submitLabel}</button>
+      </div>
+    </form>
+  );
+};
 
 const Tasks = () => {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [pageError, setPageError] = useState('');
+  const [modal, setModal] = useState(null); // { type: 'create' } | { type: 'edit', task }
   const { user } = useContext(AuthContext);
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  // New Task Form State
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [dueDate, setDueDate] = useState('');
-  const [projectId, setProjectId] = useState('');
-  const [assignedTo, setAssignedTo] = useState('');
-  const [priority, setPriority] = useState('Medium');
-  const [error, setError] = useState('');
+  const filter = FILTERS.some(f => f.id === searchParams.get('filter')) ? searchParams.get('filter') : 'all';
+  const projectFilter = searchParams.get('project') || '';
 
-  const [filter, setFilter] = useState('all');
+  const updateParam = (key, value, fallback) => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === fallback) next.delete(key); else next.set(key, value);
+    setSearchParams(next, { replace: true });
+  };
 
   // Bumping refreshKey re-runs the fetch effect below
   const [refreshKey, setRefreshKey] = useState(0);
@@ -34,436 +134,229 @@ const Tasks = () => {
         if (ignore) return;
         setTasks(tasksRes.data);
         setProjects(projectsRes.data);
+        setLoadError('');
       })
-      .catch(err => console.error('Failed to fetch data', err))
+      .catch(err => { if (!ignore) setLoadError(apiError(err, 'Could not load tasks.')); })
       .finally(() => { if (!ignore) setLoading(false); });
     return () => { ignore = true; };
   }, [refreshKey]);
 
-  const resetForm = () => {
-    setTitle('');
-    setDescription('');
-    setDueDate('');
-    setAssignedTo('');
-    setPriority('Medium');
-    setError('');
-  };
+  const projectById = new Map(projects.map(p => [p.id, p]));
+  const manageableProjects = projects.filter(p => canManageProject(user, p));
+  const canManageTask = (task) => canManageProject(user, projectById.get(task.project_id));
 
-  const openCreateModal = () => {
-    resetForm();
-    setProjectId(projects.length > 0 ? projects[0].id : '');
-    setIsModalOpen(true);
-  };
-
-  const handleProjectChange = (value) => {
-    setProjectId(value);
-    // The assignee must belong to the selected project
-    const project = projects.find(p => p.id === parseInt(value));
-    if (!project?.members?.some(m => String(m.id) === String(assignedTo))) {
-      setAssignedTo('');
-    }
-  };
-
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayISO();
   const isOverdue = (task) => !!task.due_date && task.status !== 'Done' && task.due_date < today;
 
-  const visibleTasks = tasks.filter(task => {
-    if (filter === 'mine') return task.assigned_to === user?.id;
-    if (filter === 'overdue') return isOverdue(task);
+  const matchesFilter = (task, id) => {
+    if (id === 'open') return task.status !== 'Done';
+    if (id === 'mine') return task.assigned_to === user?.id;
+    if (id === 'overdue') return isOverdue(task);
     return true;
-  });
+  };
+  const projectTasks = projectFilter ? tasks.filter(t => String(t.project_id) === projectFilter) : tasks;
+  const visibleTasks = projectTasks.filter(t => matchesFilter(t, filter));
 
-  const handleCreateTask = async (e) => {
-    e.preventDefault();
-    setError('');
+  const handleCreate = async (payload) => {
     try {
-      await api.post('/tasks', { 
-        title, 
-        description, 
-        due_date: dueDate, 
-        project_id: projectId,
-        assigned_to: assignedTo || null,
-        priority
-      });
-      setIsModalOpen(false);
-      resetForm();
+      await api.post('/tasks', payload);
+      setModal(null);
       fetchData();
+      return null;
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to create task');
+      return apiError(err, 'Failed to create task');
     }
   };
 
-  const handleStatusChange = async (taskId, newStatus) => {
+  const handleEdit = async (payload) => {
     try {
-      await api.put(`/tasks/${taskId}/status`, { status: newStatus });
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to update status');
-      console.error('Failed to update status', err);
-    }
-  };
-
-  const handleDeleteTask = async (taskId) => {
-    if (!window.confirm('Are you sure you want to delete this task?')) return;
-    try {
-      await api.delete(`/tasks/${taskId}`);
-      setTasks(prev => prev.filter(t => t.id !== taskId));
-    } catch (err) {
-      alert(err.response?.data?.message || 'Failed to delete task');
-    }
-  };
-
-  const openEditModal = (task) => {
-    setSelectedTaskId(task.id);
-    setTitle(task.title);
-    setDescription(task.description || '');
-    setDueDate(task.due_date || '');
-    setProjectId(task.project_id || (projects.length > 0 ? projects[0].id : ''));
-    setAssignedTo(task.assigned_to || '');
-    setPriority(task.priority || 'Medium');
-    setError('');
-    setIsEditModalOpen(true);
-  };
-
-  const handleEditTask = async (e) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await api.put(`/tasks/${selectedTaskId}`, {
-        title,
-        description,
-        due_date: dueDate,
-        project_id: projectId,
-        assigned_to: assignedTo || null,
-        priority
-      });
-      setIsEditModalOpen(false);
-      resetForm();
+      await api.put(`/tasks/${modal.task.id}`, payload);
+      setModal(null);
       fetchData();
+      return null;
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to update task');
+      return apiError(err, 'Failed to update task');
     }
   };
 
-  const getStatusBadgeClass = (status) => {
-    switch(status) {
-      case 'To Do': return 'badge-pending';
-      case 'In Progress': return 'badge-progress';
-      case 'Done': return 'badge-completed';
-      default: return 'badge-pending';
+  const handleStatusChange = async (task, newStatus) => {
+    setPageError('');
+    const previous = task.status;
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
+    try {
+      await api.put(`/tasks/${task.id}/status`, { status: newStatus });
+    } catch (err) {
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: previous } : t));
+      setPageError(apiError(err, 'Failed to update status'));
     }
   };
 
-  const getStatusIcon = (status) => {
-    switch(status) {
-      case 'To Do': return <Clock size={16} />;
-      case 'In Progress': return <Activity size={16} />;
-      case 'Done': return <CheckCircle size={16} />;
-      default: return <Clock size={16} />;
+  const handleDelete = async (task) => {
+    if (!window.confirm(`Delete "${task.title}"? This can't be undone.`)) return;
+    setPageError('');
+    try {
+      await api.delete(`/tasks/${task.id}`);
+      setTasks(prev => prev.filter(t => t.id !== task.id));
+    } catch (err) {
+      setPageError(apiError(err, 'Failed to delete task'));
     }
   };
 
-  const getPriorityColor = (p) => {
-    switch(p) {
-      case 'High': return 'var(--danger-color)';
-      case 'Medium': return 'var(--warning-color)';
-      case 'Low': return 'var(--secondary-color)';
-      default: return 'var(--text-muted)';
-    }
+  const emptyCopy = {
+    all: projectFilter ? 'This project has no tasks yet.' : (manageableProjects.length ? 'Create a task to start tracking work.' : 'Tasks in your projects will appear here.'),
+    open: 'Everything here is done.',
+    mine: 'Nothing is assigned to you right now.',
+    overdue: 'Nothing is overdue. Nice work.',
   };
-
-  const selectedProjectObj = projects.find(p => p.id === parseInt(projectId));
 
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
-        <h1 style={{ marginBottom: 0, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <CheckSquare size={32} color="var(--primary-color)" />
-          Tasks
-        </h1>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <select
-            className="form-control"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ width: 'auto', padding: '0.5rem', fontSize: '0.85rem' }}
-            aria-label="Filter tasks"
-          >
-            <option value="all">All tasks</option>
-            <option value="mine">Assigned to me</option>
-            <option value="overdue">Overdue</option>
-          </select>
-          {user?.role === 'Admin' && (
-            <button className="btn btn-primary" onClick={openCreateModal}>
-              <Plus size={18} /> New Task
+    <>
+      <div className="page-header">
+        <h1 className="page-title"><CheckSquare size={30} aria-hidden="true" /> Tasks</h1>
+        <div className="page-actions">
+          {projects.length > 1 && (
+            <>
+              <label htmlFor="project-filter" className="sr-only">Filter by project</label>
+              <select
+                id="project-filter"
+                className="form-control form-control-sm"
+                value={projectFilter}
+                onChange={(e) => updateParam('project', e.target.value, '')}
+              >
+                <option value="">All projects</option>
+                {projects.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
+              </select>
+            </>
+          )}
+          {manageableProjects.length > 0 && (
+            <button type="button" className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>
+              <Plus size={18} aria-hidden="true" /> New task
             </button>
           )}
         </div>
       </div>
 
-      {loading ? (
-        <div>Loading tasks...</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {visibleTasks.map((task) => (
-            <div key={task.id} className="card glass" style={{ padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', transition: 'all 0.2s' }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-                  <h3 style={{ fontSize: '1.1rem', margin: 0, color: task.status === 'Done' ? 'var(--text-muted)' : 'var(--text-main)', textDecoration: task.status === 'Done' ? 'line-through' : 'none' }}>
-                    {task.title}
-                  </h3>
-                  <span className={`badge ${getStatusBadgeClass(task.status)}`} style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                    {getStatusIcon(task.status)} {task.status}
-                  </span>
-                  {task.priority && (
-                    <span style={{ fontSize: '0.75rem', fontWeight: 600, color: getPriorityColor(task.priority), display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                      <AlertCircle size={14} /> {task.priority}
-                    </span>
-                  )}
-                </div>
-                <div style={{ display: 'flex', gap: '1.5rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                  {task.project && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <CheckSquare size={14} /> Project: {task.project.title}
-                    </span>
-                  )}
-                  {task.due_date && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: isOverdue(task) ? 'var(--danger-color)' : undefined, fontWeight: isOverdue(task) ? 600 : undefined }}>
-                      {isOverdue(task) ? <AlertCircle size={14} /> : <Calendar size={14} />} Due: {task.due_date} {isOverdue(task) ? '(Overdue)' : ''}
-                    </span>
-                  )}
-                  {task.assignee && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <User size={14} /> Assignee: {task.assigned_to === user?.id ? 'You' : task.assignee.name}
-                    </span>
-                  )}
-                </div>
-              </div>
-              
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <select 
-                  className="form-control" 
-                  value={task.status}
-                  onChange={(e) => handleStatusChange(task.id, e.target.value)}
-                  style={{ width: 'auto', padding: '0.5rem', fontSize: '0.85rem' }}
-                  disabled={user?.role !== 'Admin' && task.assigned_to !== user?.id}
-                >
-                  <option value="To Do">To Do</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Done">Done</option>
-                </select>
-                {user?.role === 'Admin' && (
-                  <>
-                    <button onClick={() => openEditModal(task)} style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer' }}>
-                      <Edit2 size={18} />
-                    </button>
-                    <button onClick={() => handleDeleteTask(task.id)} style={{ background: 'none', border: 'none', color: 'var(--danger-color)', cursor: 'pointer' }}>
-                      <Trash2 size={18} />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
+      {!loading && !loadError && tasks.length > 0 && (
+        <div className="filter-tabs" role="group" aria-label="Filter tasks">
+          {FILTERS.map(f => (
+            <button
+              key={f.id}
+              type="button"
+              className="filter-tab"
+              aria-pressed={filter === f.id}
+              onClick={() => updateParam('filter', f.id, 'all')}
+            >
+              {f.label}
+              <span className="filter-count">{projectTasks.filter(t => matchesFilter(t, f.id)).length}</span>
+            </button>
           ))}
-          {visibleTasks.length === 0 && (
-             <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-               No tasks found.
-             </div>
+        </div>
+      )}
+
+      {pageError && <Alert type="error" onDismiss={() => setPageError('')}>{pageError}</Alert>}
+
+      {loading ? (
+        <LoadingState label="Loading tasks…" />
+      ) : loadError ? (
+        <ErrorState title="Tasks unavailable" message={loadError} onRetry={() => { setLoading(true); fetchData(); }} />
+      ) : visibleTasks.length === 0 ? (
+        <EmptyState
+          icon={<CheckSquare size={24} />}
+          title={tasks.length === 0 ? 'No tasks yet' : 'No matching tasks'}
+          action={tasks.length === 0 && manageableProjects.length > 0 && (
+            <button type="button" className="btn btn-primary" onClick={() => setModal({ type: 'create' })}>
+              <Plus size={18} aria-hidden="true" /> Create a task
+            </button>
           )}
-        </div>
+        >
+          {tasks.length === 0 && projects.length === 0
+            ? (user?.role === 'Admin' ? 'Create a project first, then add tasks to it.' : "You haven't been added to a project yet.")
+            : emptyCopy[filter]}
+        </EmptyState>
+      ) : (
+        <ul className="task-list">
+          {visibleTasks.map((task) => {
+            const overdue = isOverdue(task);
+            const manage = canManageTask(task);
+            const canChangeStatus = manage || task.assigned_to === user?.id;
+            const { badge, icon: StatusIcon } = STATUS_META[task.status] || STATUS_META['To Do'];
+            return (
+              <li key={task.id} className={`card glass task-row ${overdue ? 'overdue' : ''}`}>
+                <div className="task-main">
+                  <div className="task-title-line">
+                    <h2 className={`task-title ${task.status === 'Done' ? 'done' : ''}`}>{task.title}</h2>
+                    <span className={`badge ${badge}`}><StatusIcon size={13} aria-hidden="true" /> {task.status}</span>
+                    {task.priority && (
+                      <span className={`badge badge-plain ${PRIORITY_BADGE[task.priority]}`}>
+                        <Flag size={12} aria-hidden="true" /> {task.priority}<span className="sr-only"> priority</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="task-meta">
+                    {task.project && (
+                      <span className="meta"><FolderKanban size={14} aria-hidden="true" /> {task.project.title}</span>
+                    )}
+                    {task.due_date && (
+                      <span className={`meta ${overdue ? 'overdue' : ''}`}>
+                        {overdue ? <AlertCircle size={14} aria-hidden="true" /> : <Calendar size={14} aria-hidden="true" />}
+                        Due {formatDate(task.due_date)}{overdue ? ' · Overdue' : ''}
+                      </span>
+                    )}
+                    <span className="meta">
+                      <User size={14} aria-hidden="true" />
+                      {task.assignee ? (task.assigned_to === user?.id ? 'You' : task.assignee.name) : 'Unassigned'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="task-actions">
+                  <select
+                    className="form-control form-control-sm"
+                    value={task.status}
+                    onChange={(e) => handleStatusChange(task, e.target.value)}
+                    disabled={!canChangeStatus}
+                    aria-label={`Status of ${task.title}`}
+                    title={canChangeStatus ? undefined : 'Only the assignee or a project Admin can change the status'}
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Done">Done</option>
+                  </select>
+                  {manage && (
+                    <div style={{ display: 'flex', gap: '0.15rem' }}>
+                      <button type="button" className="icon-btn" onClick={() => setModal({ type: 'edit', task })} aria-label={`Edit ${task.title}`} title="Edit task">
+                        <Edit2 size={17} />
+                      </button>
+                      <button type="button" className="icon-btn danger" onClick={() => handleDelete(task)} aria-label={`Delete ${task.title}`} title="Delete task">
+                        <Trash2 size={17} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
 
-      {/* Create Task Modal */}
-      {isModalOpen && user?.role === 'Admin' && (
-        <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
-          <div className="glass modal-content" style={{ padding: '2rem' }} onClick={e => e.stopPropagation()}>
-            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Plus size={24} color="var(--primary-color)" /> Create New Task
-            </h2>
-            {error && <div style={{ color: 'var(--danger-color)', marginBottom: '1rem' }}>{error}</div>}
-            <form onSubmit={handleCreateTask}>
-              <div className="form-group">
-                <label className="form-label">Task Title</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Description</label>
-                <textarea 
-                  className="form-control" 
-                  rows="3"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                ></textarea>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Due Date</label>
-                  <input 
-                    type="date" 
-                    className="form-control" 
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Project</label>
-                  <select 
-                    className="form-control"
-                    value={projectId}
-                    onChange={(e) => handleProjectChange(e.target.value)}
-                    required
-                  >
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.title}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Priority</label>
-                  <select 
-                    className="form-control"
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value)}
-                  >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Assign To</label>
-                  <select 
-                    className="form-control"
-                    value={assignedTo}
-                    onChange={(e) => setAssignedTo(e.target.value)}
-                  >
-                    <option value="">-- Unassigned --</option>
-                    {selectedProjectObj?.members?.map(m => (
-                      <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
-                <button type="button" className="btn" onClick={() => setIsModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary" disabled={projects.length === 0}>
-                  Create Task
-                </button>
-              </div>
-              {projects.length === 0 && (
-                <p style={{ color: 'var(--danger-color)', fontSize: '0.8rem', marginTop: '0.5rem' }}>You need to create a project first before creating tasks.</p>
-              )}
-            </form>
-          </div>
-        </div>
+      {modal?.type === 'create' && (
+        <Modal title="New task" icon={<Plus size={22} aria-hidden="true" />} onClose={() => setModal(null)}>
+          <TaskForm
+            initial={{ project_id: projectFilter && manageableProjects.some(p => String(p.id) === projectFilter) ? projectFilter : undefined }}
+            projects={manageableProjects}
+            submitLabel="Create task"
+            onSubmit={handleCreate}
+            onCancel={() => setModal(null)}
+          />
+        </Modal>
       )}
 
-      {/* Edit Task Modal */}
-      {isEditModalOpen && user?.role === 'Admin' && (
-        <div className="modal-overlay" onClick={() => setIsEditModalOpen(false)}>
-          <div className="glass modal-content" style={{ padding: '2rem' }} onClick={e => e.stopPropagation()}>
-            <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Edit2 size={24} color="var(--primary-color)" /> Edit Task
-            </h2>
-            {error && <div style={{ color: 'var(--danger-color)', marginBottom: '1rem' }}>{error}</div>}
-            <form onSubmit={handleEditTask}>
-              <div className="form-group">
-                <label className="form-label">Task Title</label>
-                <input 
-                  type="text" 
-                  className="form-control" 
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required 
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Description</label>
-                <textarea 
-                  className="form-control" 
-                  rows="3"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                ></textarea>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Due Date</label>
-                  <input 
-                    type="date" 
-                    className="form-control" 
-                    value={dueDate}
-                    onChange={(e) => setDueDate(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Project</label>
-                  <select 
-                    className="form-control"
-                    value={projectId}
-                    onChange={(e) => handleProjectChange(e.target.value)}
-                    required
-                  >
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>{p.title}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                <div className="form-group">
-                  <label className="form-label">Priority</label>
-                  <select 
-                    className="form-control"
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value)}
-                  >
-                    <option value="Low">Low</option>
-                    <option value="Medium">Medium</option>
-                    <option value="High">High</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Assign To</label>
-                  <select 
-                    className="form-control"
-                    value={assignedTo}
-                    onChange={(e) => setAssignedTo(e.target.value)}
-                  >
-                    <option value="">-- Unassigned --</option>
-                    {selectedProjectObj?.members?.map(m => (
-                      <option key={m.id} value={m.id}>{m.name} ({m.email})</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-end', marginTop: '2rem' }}>
-                <button type="button" className="btn" onClick={() => setIsEditModalOpen(false)} style={{ background: 'transparent', color: 'var(--text-main)', border: '1px solid var(--border-color)' }}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Save Changes
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {modal?.type === 'edit' && (
+        <Modal title="Edit task" icon={<Edit2 size={22} aria-hidden="true" />} onClose={() => setModal(null)}>
+          <TaskForm initial={modal.task} projects={manageableProjects} submitLabel="Save changes" onSubmit={handleEdit} onCancel={() => setModal(null)} />
+        </Modal>
       )}
-    </div>
+    </>
   );
 };
 
