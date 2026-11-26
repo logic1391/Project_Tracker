@@ -2,11 +2,23 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
-const JWT_SECRET = 'your_super_secret_key_123'; // In a real app, use process.env.JWT_SECRET
+const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/auth');
+
+const VALID_ROLES = ['Admin', 'Member'];
 
 const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password, role } = req.body || {};
+
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: 'Name, email and password are required' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Password must be at least 6 characters' });
+    }
+    if (role && !VALID_ROLES.includes(role)) {
+      return res.status(400).json({ message: `Role must be one of: ${VALID_ROLES.join(', ')}` });
+    }
 
     // Check if user exists
     const existingUser = await User.findOne({ where: { email } });
@@ -28,13 +40,19 @@ const register = async (req, res) => {
 
     res.status(201).json({ message: 'User created successfully', user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role } });
   } catch (err) {
+    if (err.name === 'SequelizeValidationError') {
+      return res.status(400).json({ message: err.errors.map(e => e.message).join(', ') });
+    }
     res.status(500).json({ error: err.message });
   }
 };
 
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
 
     // Find user
     const user = await User.findOne({ where: { email } });
@@ -49,7 +67,7 @@ const login = async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.json({
       token,

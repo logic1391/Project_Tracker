@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -14,6 +15,11 @@ app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/projects', require('./routes/projectRoutes'));
 app.use('/api/tasks', require('./routes/taskRoutes'));
 app.use('/api/dashboard', require('./routes/dashboardRoutes'));
+
+// Unknown API routes return JSON instead of falling through to the SPA
+app.use('/api', (req, res) => {
+  res.status(404).json({ message: 'API route not found' });
+});
 
 // Serve frontend in production
 if (process.env.NODE_ENV === 'production') {

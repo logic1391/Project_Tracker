@@ -1,6 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
-const JWT_SECRET = 'your_super_secret_key_123'; // In a real app, use process.env.JWT_SECRET
+const { JWT_SECRET } = require('../config/auth');
 
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -16,7 +16,7 @@ const authenticateToken = async (req, res, next) => {
     }
     next();
   } catch (err) {
-    res.status(403).json({ message: 'Invalid Token' });
+    res.status(401).json({ message: 'Invalid or expired token' });
   }
 };
 
