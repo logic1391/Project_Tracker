@@ -1,23 +1,27 @@
-import React, { createContext, useState, useEffect } from 'react';
-import api from '../services/api';
+import { useState, useEffect } from 'react';
+import api, { AUTH_EXPIRED_EVENT } from '../services/api';
+import { AuthContext } from './auth-context';
 
-export const AuthContext = createContext();
+const readStoredUser = () => {
+  try {
+    const storedUser = localStorage.getItem('user');
+    const token = localStorage.getItem('token');
+    return storedUser && token ? JSON.parse(storedUser) : null;
+  } catch {
+    return null;
+  }
+};
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // Restore the session synchronously from localStorage
+  const [user, setUser] = useState(readStoredUser);
+  const loading = false;
 
+  // Log out automatically when the API reports an expired/invalid token
   useEffect(() => {
-    // Check if user is logged in
-    const checkUser = () => {
-      const storedUser = localStorage.getItem('user');
-      const token = localStorage.getItem('token');
-      if (storedUser && token) {
-        setUser(JSON.parse(storedUser));
-      }
-      setLoading(false);
-    };
-    checkUser();
+    const handleExpired = () => setUser(null);
+    window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
   }, []);
 
   const login = async (email, password) => {

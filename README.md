@@ -47,3 +47,14 @@ npm run dev
 
 The frontend will be available at `http://localhost:5173` and the backend will run on `http://localhost:5001`.
 
+
+### Configuration
+
+The server reads these optional environment variables (a `server/.env` file is supported):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `5001` | API port |
+| `JWT_SECRET` | development fallback | Secret used to sign JWTs. **Set this in production.** |
+| `JWT_EXPIRES_IN` | `1d` | Token lifetime |
+| `DB_STORAGE` | `server/database.sqlite` | Path of the SQLite database file |

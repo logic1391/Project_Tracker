@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { AuthContext } from '../../context/AuthContext';
+import { useState, useEffect, useContext } from 'react';
+import { AuthContext } from '../../context/auth-context';
 import api from '../../services/api';
 import { Plus, FolderKanban, Users, ListTodo, UserPlus, Calendar, AlertCircle, Edit2, Trash2 } from 'lucide-react';
 
@@ -22,6 +22,8 @@ const Projects = () => {
   const [error, setError] = useState('');
 
   // Edit Project Form State
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
   const [editStatus, setEditStatus] = useState('Draft');
   const [editDueDate, setEditDueDate] = useState('');
   const [editError, setEditError] = useState('');
@@ -31,20 +33,18 @@ const Projects = () => {
   const [memberRole, setMemberRole] = useState('Member');
   const [memberError, setMemberError] = useState('');
 
-  const fetchProjects = async () => {
-    try {
-      const response = await api.get('/projects');
-      setProjects(response.data);
-    } catch (err) {
-      console.error('Failed to fetch projects', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Bumping refreshKey re-runs the fetch effect below
+  const [refreshKey, setRefreshKey] = useState(0);
+  const fetchProjects = () => setRefreshKey(k => k + 1);
 
   useEffect(() => {
-    fetchProjects();
-  }, []);
+    let ignore = false;
+    api.get('/projects')
+      .then(response => { if (!ignore) setProjects(response.data); })
+      .catch(err => console.error('Failed to fetch projects', err))
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
+  }, [refreshKey]);
 
   const handleCreateProject = async (e) => {
     e.preventDefault();
@@ -85,6 +85,8 @@ const Projects = () => {
 
   const openEditModal = (project) => {
     setSelectedProjectId(project.id);
+    setEditTitle(project.title || '');
+    setEditDescription(project.description || '');
     setEditStatus(project.status || 'Draft');
     setEditDueDate(project.due_date || '');
     setEditError('');
@@ -95,7 +97,7 @@ const Projects = () => {
     e.preventDefault();
     setEditError('');
     try {
-      await api.put(`/projects/${selectedProjectId}`, { status: editStatus, due_date: editDueDate });
+      await api.put(`/projects/${selectedProjectId}`, { title: editTitle, description: editDescription, status: editStatus, due_date: editDueDate || null });
       setIsEditModalOpen(false);
       fetchProjects();
     } catch (err) {
@@ -168,7 +170,7 @@ const Projects = () => {
                     <button 
                       className="btn" 
                       style={{ padding: '0.4rem', background: 'transparent', color: 'var(--primary-color)' }}
-                      onClick={() => { setSelectedProjectId(project.id); setIsMemberModalOpen(true); }}
+                      onClick={() => { setSelectedProjectId(project.id); setMemberError(''); setMemberEmail(''); setIsMemberModalOpen(true); }}
                       title="Manage Members"
                     >
                       <Users size={16} />
@@ -192,7 +194,7 @@ const Projects = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Users size={16} />
-                    {project.members?.length || 1} Members
+                    {project.members?.length || 0} Members
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <ListTodo size={16} />
@@ -277,6 +279,25 @@ const Projects = () => {
             {editError && <div style={{ color: 'var(--danger-color)', marginBottom: '1rem' }}>{editError}</div>}
             <form onSubmit={handleEditProject}>
               <div className="form-group">
+                <label className="form-label">Project Title</label>
+                <input 
+                  type="text" 
+                  className="form-control" 
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  required 
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea 
+                  className="form-control" 
+                  rows="3"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                ></textarea>
+              </div>
+              <div className="form-group">
                 <label className="form-label">Project Status</label>
                 <select 
                   className="form-control"
@@ -289,7 +310,7 @@ const Projects = () => {
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Extended Due Date</label>
+                <label className="form-label">Due Date (extend deadline)</label>
                 <input 
                   type="date" 
                   className="form-control" 

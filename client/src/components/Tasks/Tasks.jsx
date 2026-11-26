@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { AuthContext } from '../../context/AuthContext';
+import { useState, useEffect, useContext } from 'react';
+import { AuthContext } from '../../context/auth-context';
 import api from '../../services/api';
 import { CheckSquare, Plus, Clock, Calendar, CheckCircle, Activity, User, AlertCircle, Trash2, Edit2 } from 'lucide-react';
 
@@ -21,27 +21,57 @@ const Tasks = () => {
   const [priority, setPriority] = useState('Medium');
   const [error, setError] = useState('');
 
-  const fetchData = async () => {
-    try {
-      const [tasksRes, projectsRes] = await Promise.all([
-        api.get('/tasks'),
-        api.get('/projects')
-      ]);
-      setTasks(tasksRes.data);
-      setProjects(projectsRes.data);
-      if (projectsRes.data.length > 0) {
-        setProjectId(projectsRes.data[0].id);
-      }
-    } catch (err) {
-      console.error('Failed to fetch data', err);
-    } finally {
-      setLoading(false);
+  const [filter, setFilter] = useState('all');
+
+  // Bumping refreshKey re-runs the fetch effect below
+  const [refreshKey, setRefreshKey] = useState(0);
+  const fetchData = () => setRefreshKey(k => k + 1);
+
+  useEffect(() => {
+    let ignore = false;
+    Promise.all([api.get('/tasks'), api.get('/projects')])
+      .then(([tasksRes, projectsRes]) => {
+        if (ignore) return;
+        setTasks(tasksRes.data);
+        setProjects(projectsRes.data);
+      })
+      .catch(err => console.error('Failed to fetch data', err))
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
+  }, [refreshKey]);
+
+  const resetForm = () => {
+    setTitle('');
+    setDescription('');
+    setDueDate('');
+    setAssignedTo('');
+    setPriority('Medium');
+    setError('');
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setProjectId(projects.length > 0 ? projects[0].id : '');
+    setIsModalOpen(true);
+  };
+
+  const handleProjectChange = (value) => {
+    setProjectId(value);
+    // The assignee must belong to the selected project
+    const project = projects.find(p => p.id === parseInt(value));
+    if (!project?.members?.some(m => String(m.id) === String(assignedTo))) {
+      setAssignedTo('');
     }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  const today = new Date().toISOString().split('T')[0];
+  const isOverdue = (task) => !!task.due_date && task.status !== 'Done' && task.due_date < today;
+
+  const visibleTasks = tasks.filter(task => {
+    if (filter === 'mine') return task.assigned_to === user?.id;
+    if (filter === 'overdue') return isOverdue(task);
+    return true;
+  });
 
   const handleCreateTask = async (e) => {
     e.preventDefault();
@@ -56,11 +86,7 @@ const Tasks = () => {
         priority
       });
       setIsModalOpen(false);
-      setTitle('');
-      setDescription('');
-      setDueDate('');
-      setAssignedTo('');
-      setPriority('Medium');
+      resetForm();
       fetchData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to create task');
@@ -70,7 +96,7 @@ const Tasks = () => {
   const handleStatusChange = async (taskId, newStatus) => {
     try {
       await api.put(`/tasks/${taskId}/status`, { status: newStatus });
-      setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to update status');
       console.error('Failed to update status', err);
@@ -81,7 +107,7 @@ const Tasks = () => {
     if (!window.confirm('Are you sure you want to delete this task?')) return;
     try {
       await api.delete(`/tasks/${taskId}`);
-      setTasks(tasks.filter(t => t.id !== taskId));
+      setTasks(prev => prev.filter(t => t.id !== taskId));
     } catch (err) {
       alert(err.response?.data?.message || 'Failed to delete task');
     }
@@ -112,11 +138,7 @@ const Tasks = () => {
         priority
       });
       setIsEditModalOpen(false);
-      setTitle('');
-      setDescription('');
-      setDueDate('');
-      setAssignedTo('');
-      setPriority('Medium');
+      resetForm();
       fetchData();
     } catch (err) {
       setError(err.response?.data?.message || 'Failed to update task');
@@ -159,18 +181,31 @@ const Tasks = () => {
           <CheckSquare size={32} color="var(--primary-color)" />
           Tasks
         </h1>
-        {user?.role === 'Admin' && (
-          <button className="btn btn-primary" onClick={() => setIsModalOpen(true)}>
-            <Plus size={18} /> New Task
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+          <select
+            className="form-control"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{ width: 'auto', padding: '0.5rem', fontSize: '0.85rem' }}
+            aria-label="Filter tasks"
+          >
+            <option value="all">All tasks</option>
+            <option value="mine">Assigned to me</option>
+            <option value="overdue">Overdue</option>
+          </select>
+          {user?.role === 'Admin' && (
+            <button className="btn btn-primary" onClick={openCreateModal}>
+              <Plus size={18} /> New Task
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
         <div>Loading tasks...</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {tasks.map((task) => (
+          {visibleTasks.map((task) => (
             <div key={task.id} className="card glass" style={{ padding: '1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', transition: 'all 0.2s' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
@@ -193,13 +228,13 @@ const Tasks = () => {
                     </span>
                   )}
                   {task.due_date && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <Calendar size={14} /> Due: {task.due_date}
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: isOverdue(task) ? 'var(--danger-color)' : undefined, fontWeight: isOverdue(task) ? 600 : undefined }}>
+                      {isOverdue(task) ? <AlertCircle size={14} /> : <Calendar size={14} />} Due: {task.due_date} {isOverdue(task) ? '(Overdue)' : ''}
                     </span>
                   )}
                   {task.assignee && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <User size={14} /> Assignee: {task.assignee.name}
+                      <User size={14} /> Assignee: {task.assigned_to === user?.id ? 'You' : task.assignee.name}
                     </span>
                   )}
                 </div>
@@ -230,7 +265,7 @@ const Tasks = () => {
               </div>
             </div>
           ))}
-          {tasks.length === 0 && (
+          {visibleTasks.length === 0 && (
              <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
                No tasks found.
              </div>
@@ -239,7 +274,7 @@ const Tasks = () => {
       )}
 
       {/* Create Task Modal */}
-      {isModalOpen && (
+      {isModalOpen && user?.role === 'Admin' && (
         <div className="modal-overlay" onClick={() => setIsModalOpen(false)}>
           <div className="glass modal-content" style={{ padding: '2rem' }} onClick={e => e.stopPropagation()}>
             <h2 style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -281,7 +316,7 @@ const Tasks = () => {
                   <select 
                     className="form-control"
                     value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
+                    onChange={(e) => handleProjectChange(e.target.value)}
                     required
                   >
                     {projects.map(p => (
@@ -378,7 +413,7 @@ const Tasks = () => {
                   <select 
                     className="form-control"
                     value={projectId}
-                    onChange={(e) => setProjectId(e.target.value)}
+                    onChange={(e) => handleProjectChange(e.target.value)}
                     required
                   >
                     {projects.map(p => (
