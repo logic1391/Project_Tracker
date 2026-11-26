@@ -1,15 +1,18 @@
 import { useState, useContext } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { AuthContext } from '../../context/auth-context';
 import { LogIn } from 'lucide-react';
+import { Alert } from '../ui/States';
 
 const Login = () => {
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  const [email, setEmail] = useState(location.state?.email || '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { login } = useContext(AuthContext);
   const navigate = useNavigate();
+  const notice = location.state?.notice;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -17,64 +20,62 @@ const Login = () => {
     setIsLoading(true);
 
     const result = await login(email, password);
+    setIsLoading(false);
     if (result.success) {
       navigate('/');
     } else {
       setError(result.message);
     }
-    setIsLoading(false);
   };
 
   return (
-    <div className="auth-container">
+    <main className="auth-container">
       <div className="glass auth-card">
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <div style={{ width: 48, height: 48, borderRadius: 12, background: 'var(--primary-color)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'white', marginBottom: '1rem' }}>
-            <LogIn size={24} />
-          </div>
-          <h2 style={{ fontSize: '1.75rem', marginBottom: '0.5rem' }}>Welcome Back</h2>
-          <p style={{ color: 'var(--text-muted)' }}>Sign in to continue to Project Tracker</p>
+        <div className="auth-head">
+          <div className="auth-icon" aria-hidden="true"><LogIn size={24} /></div>
+          <h1 className="auth-title">Welcome back</h1>
+          <p className="muted">Sign in to continue to Project Tracker</p>
         </div>
 
-        {error && (
-          <div style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--danger-color)', color: '#fca5a5', padding: '0.75rem', borderRadius: '8px', marginBottom: '1.5rem', fontSize: '0.9rem' }}>
-            {error}
-          </div>
-        )}
+        {notice && !error && <Alert type="success">{notice}</Alert>}
+        {error && <Alert type="error">{error}</Alert>}
 
         <form onSubmit={handleSubmit}>
           <div className="form-group">
-            <label className="form-label">Email Address</label>
-            <input 
-              type="email" 
-              className="form-control" 
+            <label className="form-label" htmlFor="login-email">Email address</label>
+            <input
+              id="login-email"
+              type="email"
+              className="form-control"
               placeholder="you@example.com"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Password</label>
-            <input 
-              type="password" 
-              className="form-control" 
-              placeholder="••••••••"
+            <label className="form-label" htmlFor="login-password">Password</label>
+            <input
+              id="login-password"
+              type="password"
+              className="form-control"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
             />
           </div>
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }} disabled={isLoading}>
-            {isLoading ? 'Signing In...' : 'Sign In'}
+          <button type="submit" className="btn btn-primary btn-block" style={{ marginTop: '0.5rem' }} disabled={isLoading}>
+            {isLoading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
-        <p style={{ textAlign: 'center', marginTop: '2rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-          Don't have an account? <Link to="/signup" style={{ color: 'var(--primary-color)', textDecoration: 'none' }}>Sign up</Link>
+        <p className="auth-foot">
+          Don't have an account? <Link to="/signup">Sign up</Link>
         </p>
       </div>
-    </div>
+    </main>
   );
 };
 
