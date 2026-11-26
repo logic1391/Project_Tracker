@@ -9,7 +9,7 @@ const getProjects = async (req, res) => {
         include: [
           { model: User, as: 'creator', attributes: ['id', 'name'] },
           { model: Task, as: 'tasks', attributes: ['id', 'status'] },
-          { model: User, as: 'members', attributes: ['id', 'name', 'email'] }
+          { model: User, as: 'members', attributes: ['id', 'name', 'email'], through: { attributes: ['role'] } }
         ]
       });
       return res.json(allProjects);
@@ -24,7 +24,7 @@ const getProjects = async (req, res) => {
           include: [
             { model: User, as: 'creator', attributes: ['id', 'name'] },
             { model: Task, as: 'tasks', attributes: ['id', 'status'] },
-            { model: User, as: 'members', attributes: ['id', 'name', 'email'] }
+            { model: User, as: 'members', attributes: ['id', 'name', 'email'], through: { attributes: ['role'] } }
           ]
         }
       ]
@@ -47,7 +47,7 @@ const getProjectById = async (req, res) => {
           as: 'tasks',
           include: [{ model: User, as: 'assignee', attributes: ['id', 'name'] }]
         },
-        { model: User, as: 'members', attributes: ['id', 'name', 'email'] }
+        { model: User, as: 'members', attributes: ['id', 'name', 'email'], through: { attributes: ['role'] } }
       ]
     });
     if (!project) return res.status(404).json({ message: 'Project not found' });
@@ -173,6 +173,33 @@ const deleteProject = async (req, res) => {
   }
 };
 
+const updateMemberRole = async (req, res) => {
+  try {
+    const { id: projectId, userId } = req.params;
+    const { role } = req.body || {};
+    if (!MEMBER_ROLES.includes(role)) {
+      return res.status(400).json({ message: `Role must be one of: ${MEMBER_ROLES.join(', ')}` });
+    }
+
+    const project = await Project.findByPk(projectId);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    // The creator always stays a project Admin
+    if (project.created_by == userId && role !== 'Admin') {
+      return res.status(400).json({ message: 'The project creator must remain a project Admin' });
+    }
+
+    const membership = await ProjectMember.findOne({ where: { project_id: projectId, user_id: userId } });
+    if (!membership) return res.status(404).json({ message: 'Member not found in this project' });
+
+    membership.role = role;
+    await membership.save();
+    res.json({ message: 'Member role updated', user_id: Number(userId), role });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 const removeMember = async (req, res) => {
   try {
     const { id: projectId, userId } = req.params;
@@ -180,7 +207,7 @@ const removeMember = async (req, res) => {
     
     if (!project) return res.status(404).json({ message: 'Project not found' });
     
-    // Optional: Prevent removing the creator
+    // The creator always stays on the project
     if (project.created_by == userId) {
       return res.status(400).json({ message: 'Cannot remove the project creator' });
     }
@@ -203,4 +230,4 @@ const removeMember = async (req, res) => {
   }
 };
 
-module.exports = { getProjects, getProjectById, createProject, addMember, updateProject, deleteProject, removeMember };
+module.exports = { getProjects, getProjectById, createProject, addMember, updateMemberRole, updateProject, deleteProject, removeMember };

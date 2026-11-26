@@ -2,15 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { getTasks, createTask, updateTaskStatus, deleteTask, updateTask } = require('../controllers/taskController');
 const authenticateToken = require('../middleware/authMiddleware');
-const authorizeRole = require('../middleware/roleMiddleware');
 
+// Permission checks live in the controller because they depend on the task's project:
+// global Admins and project-level Admins manage tasks, assignees may update status.
 router.get('/', authenticateToken, getTasks);
-// Only Admins can create tasks
-router.post('/', authenticateToken, authorizeRole('Admin'), createTask);
-// Members and Admins can update task status
+router.post('/', authenticateToken, createTask);
 router.put('/:id/status', authenticateToken, updateTaskStatus);
-// Only Admins can fully edit a task
-router.put('/:id', authenticateToken, authorizeRole('Admin'), updateTask);
-router.delete('/:id', authenticateToken, authorizeRole('Admin'), deleteTask);
+router.put('/:id', authenticateToken, updateTask);
+router.delete('/:id', authenticateToken, deleteTask);
 
 module.exports = router;

@@ -1,23 +1,20 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { User } = require('../models');
+const { User, sequelize } = require('../models');
 
 const { JWT_SECRET, JWT_EXPIRES_IN } = require('../config/auth');
 
-const VALID_ROLES = ['Admin', 'Member'];
+const publicUser = (user) => ({ id: user.id, name: user.name, email: user.email, role: user.role });
 
 const register = async (req, res) => {
   try {
-    const { name, email, password, role } = req.body || {};
+    const { name, email, password } = req.body || {};
 
     if (!name || !email || !password) {
       return res.status(400).json({ message: 'Name, email and password are required' });
     }
     if (password.length < 6) {
       return res.status(400).json({ message: 'Password must be at least 6 characters' });
-    }
-    if (role && !VALID_ROLES.includes(role)) {
-      return res.status(400).json({ message: `Role must be one of: ${VALID_ROLES.join(', ')}` });
     }
 
     // Check if user exists
@@ -30,15 +27,20 @@ const register = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const password_hash = await bcrypt.hash(password, salt);
 
-    // Create user
-    const newUser = await User.create({
-      name,
-      email,
-      password: password_hash,
-      role: role || 'Member'
+    // The very first account bootstraps the workspace as Admin; everyone else
+    // signs up as a Member and is promoted by an Admin from the Team page.
+    // The role sent by the client (if any) is deliberately ignored.
+    const newUser = await sequelize.transaction(async (transaction) => {
+      const userCount = await User.count({ transaction });
+      return User.create({
+        name: String(name).trim(),
+        email,
+        password: password_hash,
+        role: userCount === 0 ? 'Admin' : 'Member'
+      }, { transaction });
     });
 
-    res.status(201).json({ message: 'User created successfully', user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role } });
+    res.status(201).json({ message: 'User created successfully', user: publicUser(newUser) });
   } catch (err) {
     if (err.name === 'SequelizeValidationError') {
       return res.status(400).json({ message: err.errors.map(e => e.message).join(', ') });
@@ -69,18 +71,15 @@ const login = async (req, res) => {
     // Generate token
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
-    res.json({
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
-    });
+    res.json({ token, user: publicUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 };
 
-module.exports = { register, login };
+// Returns the current user, so the client can pick up role changes made by an Admin
+const me = (req, res) => {
+  res.json({ user: publicUser(req.user) });
+};
+
+module.exports = { register, login, me };
